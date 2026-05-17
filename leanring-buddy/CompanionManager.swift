@@ -118,7 +118,7 @@ final class CompanionManager: ObservableObject {
 
     /// The voice used for spoken responses. The Worker maps this key to the
     /// actual provider/model so private Fish Audio model IDs stay server-side.
-    @Published var selectedTTSVoiceOptionID: String = UserDefaults.standard.string(forKey: "selectedTTSVoiceOptionID") ?? "elevenlabs-default"
+    @Published var selectedTTSVoiceOptionID: String = UserDefaults.standard.string(forKey: "selectedTTSVoiceOptionID") ?? "fish-primary"
 
     var selectedTTSVoiceOption: CompanionTTSVoiceOption {
         ttsVoiceOptions.first(where: { $0.id == selectedTTSVoiceOptionID }) ?? ttsVoiceOptions[0]
