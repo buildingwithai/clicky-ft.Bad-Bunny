@@ -1,22 +1,18 @@
 /**
  * Clicky Proxy Worker
  *
- * Proxies requests to Claude, ElevenLabs, and Fish Audio APIs so the app never
- * ships with raw API keys. Keys are stored as Cloudflare secrets.
+ * Proxies production Clicky requests to the original Worker, while allowing
+ * /tts to use Fish Audio. Keys are stored as Cloudflare secrets.
  *
  * Routes:
- *   POST /chat  → Anthropic Messages API (streaming)
- *   POST /tts   → ElevenLabs or Fish Audio TTS API
+ *   *          → Original Clicky Worker
+ *   POST /tts  → Fish Audio TTS by default
  */
 
 interface Env {
-  ANTHROPIC_API_KEY: string;
-  ELEVENLABS_API_KEY: string;
-  ELEVENLABS_VOICE_ID: string;
   FISH_AUDIO_API_KEY?: string;
   FISH_AUDIO_PRIMARY_REFERENCE_ID?: string;
   FISH_AUDIO_SECONDARY_REFERENCE_ID?: string;
-  ASSEMBLYAI_API_KEY: string;
 }
 
 type TTSVoiceKey = "elevenlabs-default" | "fish-primary" | "fish-secondary";
@@ -24,29 +20,21 @@ type TTSVoiceKey = "elevenlabs-default" | "fish-primary" | "fish-secondary";
 interface TTSRequestBody {
   text?: string;
   voice_key?: TTSVoiceKey;
+  voice_id?: string;
+  voiceId?: string;
   model_id?: string;
   voice_settings?: unknown;
 }
+
+const ORIGINAL_CLICKY_WORKER_BASE_URL = "https://clicker-proxy-v2.farza-0cb.workers.dev";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
-    }
-
     try {
-      if (url.pathname === "/chat") {
-        return await handleChat(request, env);
-      }
-
-      if (url.pathname === "/tts") {
+      if (request.method === "POST" && url.pathname === "/tts") {
         return await handleTTS(request, env);
-      }
-
-      if (url.pathname === "/transcribe-token") {
-        return await handleTranscribeToken(env);
       }
     } catch (error) {
       console.error(`[${url.pathname}] Unhandled error:`, error);
@@ -56,77 +44,35 @@ export default {
       );
     }
 
-    return new Response("Not found", { status: 404 });
+    return await forwardToOriginalClickyWorker(request);
   },
 };
 
-async function handleChat(request: Request, env: Env): Promise<Response> {
-  const body = await request.text();
+async function forwardToOriginalClickyWorker(request: Request): Promise<Response> {
+  const originalURL = new URL(request.url);
+  originalURL.protocol = "https:";
+  originalURL.host = new URL(ORIGINAL_CLICKY_WORKER_BASE_URL).host;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body,
-  });
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set("host", originalURL.host);
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error(`[/chat] Anthropic API error ${response.status}: ${errorBody}`);
-    return new Response(errorBody, {
-      status: response.status,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") || "text/event-stream",
-      "cache-control": "no-cache",
-    },
-  });
-}
-
-async function handleTranscribeToken(env: Env): Promise<Response> {
-  const response = await fetch(
-    "https://streaming.assemblyai.com/v3/token?expires_in_seconds=480",
-    {
-      method: "GET",
-      headers: {
-        authorization: env.ASSEMBLYAI_API_KEY,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error(`[/transcribe-token] AssemblyAI token error ${response.status}: ${errorBody}`);
-    return new Response(errorBody, {
-      status: response.status,
-      headers: { "content-type": "application/json" },
-    });
-  }
-
-  const data = await response.text();
-  return new Response(data, {
-    status: 200,
-    headers: { "content-type": "application/json" },
+  return await fetch(originalURL.toString(), {
+    method: request.method,
+    headers: forwardedHeaders,
+    body: request.body,
+    redirect: "manual",
   });
 }
 
 async function handleTTS(request: Request, env: Env): Promise<Response> {
   const requestBody = await parseTTSRequestBody(request);
-  const voiceKey = requestBody.voice_key || "elevenlabs-default";
+  const voiceKey = resolveTTSVoiceKey(requestBody);
 
-  if (voiceKey === "fish-primary" || voiceKey === "fish-secondary") {
-    return await handleFishAudioTTS(requestBody, env, voiceKey);
+  if (voiceKey === "elevenlabs-default") {
+    return await forwardToOriginalClickyWorker(request);
   }
 
-  return await handleElevenLabsTTS(requestBody, env);
+  return await handleFishAudioTTS(requestBody, env, voiceKey);
 }
 
 async function parseTTSRequestBody(request: Request): Promise<TTSRequestBody> {
@@ -139,45 +85,41 @@ async function parseTTSRequestBody(request: Request): Promise<TTSRequestBody> {
   return requestBody;
 }
 
-async function handleElevenLabsTTS(requestBody: TTSRequestBody, env: Env): Promise<Response> {
-  const voiceId = env.ELEVENLABS_VOICE_ID;
-  const elevenLabsRequestBody = {
-    text: requestBody.text,
-    model_id: requestBody.model_id || "eleven_flash_v2_5",
-    voice_settings: requestBody.voice_settings || {
-      stability: 0.5,
-      similarity_boost: 0.75,
-    },
-  };
-
-  const response = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": env.ELEVENLABS_API_KEY,
-        "content-type": "application/json",
-        accept: "audio/mpeg",
-      },
-      body: JSON.stringify(elevenLabsRequestBody),
-    }
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error(`[/tts] ElevenLabs API error ${response.status}: ${errorBody}`);
-    return new Response(errorBody, {
-      status: response.status,
-      headers: { "content-type": "application/json" },
-    });
+function resolveTTSVoiceKey(requestBody: TTSRequestBody): "elevenlabs-default" | "fish-primary" | "fish-secondary" {
+  if (requestBody.voice_key === "elevenlabs-default") {
+    return "elevenlabs-default";
   }
 
-  return new Response(response.body, {
-    status: response.status,
-    headers: {
-      "content-type": response.headers.get("content-type") || "audio/mpeg",
-    },
-  });
+  if (requestBody.voice_key === "fish-secondary") {
+    return "fish-secondary";
+  }
+
+  const requestedVoiceID = requestBody.voice_id || requestBody.voiceId;
+  if (requestedVoiceID === "fish-secondary") {
+    return "fish-secondary";
+  }
+
+  if (requestBody.text && spokenTextLooksLikeRapOrLyrics(requestBody.text)) {
+    return "fish-secondary";
+  }
+
+  return "fish-primary";
+}
+
+function spokenTextLooksLikeRapOrLyrics(spokenText: string): boolean {
+  const lowercasedText = spokenText.toLowerCase();
+  const rapCueWords = ["rap", "verse", "chorus", "hook", "bars", "flow", "rhyme"];
+
+  if (rapCueWords.some((cueWord) => lowercasedText.includes(cueWord))) {
+    return true;
+  }
+
+  const nonEmptyLines = spokenText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return nonEmptyLines.length >= 4;
 }
 
 async function handleFishAudioTTS(
