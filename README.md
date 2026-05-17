@@ -1,3 +1,26 @@
+# Clicky ft. Bad Bunny
+
+![Clicky ft. Bad Bunny hero](docs/assets/clicky-ft-bad-bunny-hero.png)
+
+**Fork update: May 17, 2026.**
+
+This fork welcomes a Bad Bunny-inspired 24/7 creative friend into Clicky. The goal is simple: keep the original Clicky experience intact, then add a little more sazón for people making reggaeton music, practicing Spanish words, and wanting a creative companion with more Puerto Rican style in the room.
+
+Think of it as Clicky with more rhythm. You still get the original Mac assistant that can see your screen, listen, talk back, and point at things. On top of that, this fork adds Fish Audio text-to-speech support so the voice experience can switch between different Fish Audio models, including separate speaking and rap-style model slots.
+
+This is not an official Bad Bunny product or endorsement. It is a creative fork that uses the open-source Clicky codebase as the base and adds new voice-routing work for experimentation.
+
+## What this fork adds
+
+- Fish Audio text-to-speech support through the Cloudflare Worker.
+- Separate Fish Audio model slots for normal speaking and rap or lyric-style responses.
+- A Worker overlay path that can keep existing Clicky behavior while replacing only the text-to-speech route.
+- Secret handling through Cloudflare secrets, so API keys and private model IDs do not need to live in the repo.
+
+## Original Clicky README
+
+Everything below is the original Clicky README content, preserved so the base project instructions and context are still easy to find.
+
 Update: April 27, 2026.
 
 Hi there! I'm Farza, the guy that made Clicky.
