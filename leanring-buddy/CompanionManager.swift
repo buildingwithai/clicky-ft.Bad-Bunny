@@ -70,7 +70,7 @@ final class CompanionManager: ObservableObject {
 
     /// Base URL for the Cloudflare Worker proxy. All API requests route
     /// through this so keys never ship in the app binary.
-    private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
+    private static let workerBaseURL = "https://clicky-proxy.jovannytovar.workers.dev"
 
     private lazy var claudeAPI: ClaudeAPI = {
         return ClaudeAPI(proxyURL: "\(Self.workerBaseURL)/chat", model: selectedModel)
@@ -110,10 +110,56 @@ final class CompanionManager: ObservableObject {
     /// The Claude model used for voice responses. Persisted to UserDefaults.
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
 
+    let ttsVoiceOptions: [CompanionTTSVoiceOption] = [
+        CompanionTTSVoiceOption(id: "elevenlabs-default", displayName: "Clicky"),
+        CompanionTTSVoiceOption(id: "fish-primary", displayName: "Fish Speak"),
+        CompanionTTSVoiceOption(id: "fish-secondary", displayName: "Fish Rap")
+    ]
+
+    /// The voice used for spoken responses. The Worker maps this key to the
+    /// actual provider/model so private Fish Audio model IDs stay server-side.
+    @Published var selectedTTSVoiceOptionID: String = UserDefaults.standard.string(forKey: "selectedTTSVoiceOptionID") ?? "elevenlabs-default"
+
+    var selectedTTSVoiceOption: CompanionTTSVoiceOption {
+        ttsVoiceOptions.first(where: { $0.id == selectedTTSVoiceOptionID }) ?? ttsVoiceOptions[0]
+    }
+
+    private func ttsVoiceOptionForSpokenText(_ spokenText: String) -> CompanionTTSVoiceOption {
+        guard selectedTTSVoiceOptionID == "fish-primary",
+              spokenTextLooksLikeRapOrLyrics(spokenText),
+              let fishRapVoiceOption = ttsVoiceOptions.first(where: { $0.id == "fish-secondary" }) else {
+            return selectedTTSVoiceOption
+        }
+
+        return fishRapVoiceOption
+    }
+
+    private func spokenTextLooksLikeRapOrLyrics(_ spokenText: String) -> Bool {
+        let lowercasedText = spokenText.lowercased()
+        let rapCueWords = ["rap", "verse", "chorus", "hook", "bars", "flow", "rhyme"]
+
+        if rapCueWords.contains(where: { lowercasedText.contains($0) }) {
+            return true
+        }
+
+        let nonEmptyLines = spokenText
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return nonEmptyLines.count >= 4
+    }
+
     func setSelectedModel(_ model: String) {
         selectedModel = model
         UserDefaults.standard.set(model, forKey: "selectedClaudeModel")
         claudeAPI.model = model
+    }
+
+    func setSelectedTTSVoiceOptionID(_ voiceOptionID: String) {
+        guard ttsVoiceOptions.contains(where: { $0.id == voiceOptionID }) else { return }
+        selectedTTSVoiceOptionID = voiceOptionID
+        UserDefaults.standard.set(voiceOptionID, forKey: "selectedTTSVoiceOptionID")
     }
 
     /// User preference for whether the Clicky cursor should be shown.
@@ -579,7 +625,7 @@ final class CompanionManager: ObservableObject {
     // MARK: - AI Response Pipeline
 
     /// Captures a screenshot, sends it along with the transcript to Claude,
-    /// and plays the response aloud via ElevenLabs TTS. The cursor stays in
+    /// and plays the response aloud via the selected TTS voice. The cursor stays in
     /// the spinner/processing state until TTS audio begins playing.
     /// Claude's response may include a [POINT:x,y:label] tag which triggers
     /// the buddy to fly to that element on screen.
@@ -701,12 +747,12 @@ final class CompanionManager: ObservableObject {
                 // until the audio actually starts playing, then switch to responding.
                 if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     do {
-                        try await elevenLabsTTSClient.speakText(spokenText)
+                        try await elevenLabsTTSClient.speakText(spokenText, voiceOption: ttsVoiceOptionForSpokenText(spokenText))
                         // speakText returns after player.play() — audio is now playing
                         voiceState = .responding
                     } catch {
                         ClickyAnalytics.trackTTSError(error: error.localizedDescription)
-                        print("⚠️ ElevenLabs TTS error: \(error)")
+                        print("⚠️ TTS error: \(error)")
                         speakCreditsErrorFallback()
                     }
                 }

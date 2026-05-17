@@ -31,6 +31,12 @@ struct CompanionPanelView: View {
 
                 modelPickerRow
                     .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 8)
+
+                voicePickerRow
+                    .padding(.horizontal, 16)
             }
 
             if !companionManager.allPermissionsGranted {
@@ -631,6 +637,50 @@ struct CompanionPanelView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
                 .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    private var voicePickerRow: some View {
+        HStack {
+            Text("Voice")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                ForEach(companionManager.ttsVoiceOptions) { voiceOption in
+                    voiceOptionButton(voiceOption)
+                }
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func voiceOptionButton(_ voiceOption: CompanionTTSVoiceOption) -> some View {
+        let isSelected = companionManager.selectedTTSVoiceOptionID == voiceOption.id
+        return Button(action: {
+            companionManager.setSelectedTTSVoiceOptionID(voiceOption.id)
+        }) {
+            Text(voiceOption.displayName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(
                     RoundedRectangle(cornerRadius: 5, style: .continuous)

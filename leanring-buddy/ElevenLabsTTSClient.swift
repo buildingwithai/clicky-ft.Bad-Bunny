@@ -2,13 +2,18 @@
 //  ElevenLabsTTSClient.swift
 //  leanring-buddy
 //
-//  Streams text-to-speech audio from ElevenLabs and plays it back
-//  through the system audio output. Uses the streaming endpoint so
-//  playback begins before the full audio has been generated.
+//  Sends text-to-speech requests to the Worker proxy and plays the returned
+//  audio through the system output.
 //
 
 import AVFoundation
 import Foundation
+
+@MainActor
+struct CompanionTTSVoiceOption: Identifiable, Equatable {
+    let id: String
+    let displayName: String
+}
 
 @MainActor
 final class ElevenLabsTTSClient {
@@ -28,9 +33,9 @@ final class ElevenLabsTTSClient {
         self.session = URLSession(configuration: configuration)
     }
 
-    /// Sends `text` to ElevenLabs TTS and plays the resulting audio.
+    /// Sends `text` to the configured TTS provider and plays the resulting audio.
     /// Throws on network or decoding errors. Cancellation-safe.
-    func speakText(_ text: String) async throws {
+    func speakText(_ text: String, voiceOption: CompanionTTSVoiceOption) async throws {
         var request = URLRequest(url: proxyURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -38,6 +43,7 @@ final class ElevenLabsTTSClient {
 
         let body: [String: Any] = [
             "text": text,
+            "voice_key": voiceOption.id,
             "model_id": "eleven_flash_v2_5",
             "voice_settings": [
                 "stability": 0.5,
@@ -65,7 +71,7 @@ final class ElevenLabsTTSClient {
         let player = try AVAudioPlayer(data: data)
         self.audioPlayer = player
         player.play()
-        print("🔊 ElevenLabs TTS: playing \(data.count / 1024)KB audio")
+        print("🔊 TTS: playing \(data.count / 1024)KB audio with \(voiceOption.displayName)")
     }
 
     /// Whether TTS audio is currently playing back.
